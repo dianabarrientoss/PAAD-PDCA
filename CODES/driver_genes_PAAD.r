@@ -25,7 +25,7 @@ nrow(muts)
 #mutaicones por samples
 number_muts_IDs <- table(muts$sampleID) #We count the number of mutations of each donor
 #hipermutadores
-hypermuts <- muts[muts$sampleID %in% names(number_muts_IDs[number_muts_IDs >= 200]), ] #reduce the original dataset to those that are hypermutators
+hypermuts <- muts[muts$sampleID %in% names(number_muts_IDs[number_muts_IDs >= 500]), ] #reduce the original dataset to those that are hypermutators
 print(number_muts_IDs[unique(hypermuts$sampleID)])#We print the names and number of mutations of each hypermutator
 #barplot con carga mutacional
 pdf("barplot_PAAD.pdf", width=20, height=10)
@@ -38,7 +38,7 @@ barplot(sort(table(muts$sampleID)),
 dev.off()
 #correr dndnscv con filtros
 dout = dndscv(muts,
-max_muts_per_gene_per_sample=3,max_coding_muts_per_sample=200,outmats=T)
+max_muts_per_gene_per_sample=3,max_coding_muts_per_sample=500,outmats=T)
 #nombres d eoutput
 names(dout)
 #driver genes significativos
