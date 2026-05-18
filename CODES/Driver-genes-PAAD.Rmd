@@ -1,0 +1,311 @@
+---
+title: "Driver Genes PAAD"
+output: html_notebook
+---
+
+# dndscv
+
+## Objective
+
+Identify driver genes in dataset of PAAD (Pancreatic Adenocarcinoma) from TCGA consortium.
+
+## Preparation
+
+``` bash
+cd /mnt/data/bioinfo-estadistica-2/lgonzalez/datos_dani/cancer_genomics/data/PAAD
+
+# Copy the BLCA example to personal computer
+scp -r ysosa@ken.lavis.unam.mx:/mnt/data/bioinfo-estadistica-2/lgonzalez/datos_dani/cancer_genomics/data/PAAD .
+```
+
+## Data loading and exploration
+
+To visualize the data with dndscv, we need an input file of 5 columns, which we can extract from MAF files or VCF files:
+
+1.  Sample ID
+2.  Chromosome
+3.  Position
+4.  Reference
+5.  Mutation
+
+The info is in `muts`
+
+```{r}
+# Load library
+library(dndscv)
+
+# Read the file with 5 columns of bladder cancer
+file_mutations = read.table("C:/Users/Dell/Documents/funcional2/PAAD/data_mutations.txt", header=T, sep='\t', stringsAsFactors=F)
+head(file_mutations)
+
+#First observations of dataset
+muts = file_mutations[ , c("Tumor_Sample_Barcode", "Chromosome", "Start_Position", "Reference_Allele", "Tumor_Seq_Allele2")]
+colnames(muts) = c("sampleID", "chr", "pos", "ref", "mut")
+head(muts)
+
+clinical_data = read.table("C:/Users/Dell/Documents/funcional2/PAAD/paad_tcga_pan_can_atlas_2018_clinical_data.tsv", header=T, sep='\t', stringsAsFactors=F)
+head(clinical_data)
+```
+
+Exploring the data base structure
+
+```{r}
+# Number of samples
+cat("Number of samples: ", length(unique(muts$sampleID)), "\n")
+
+# Number of mutations
+cat("Number of mutations: ", nrow(muts), "\n")
+```
+
+Mutational burden per sample
+
+```{r}
+barplot(sort(table(muts$sampleID)), ylab="Number of mutations", xlab="Donors", las=2, names.arg="", main="Mutational Burden")
+```
+
+It's important to exclude the **hypermutators** (more than 500 mutations in the exome) because it can have a negative impact on the statistical process to detect drivers.
+
+```{r}
+# Verifica exactamente cuántas muestras caen en cada rango
+mut_count = table(muts$sampleID)
+
+sum(mut_count > 1000)   # hipermutadores extremos
+sum(mut_count > 500)    # hipermutadores moderados  
+sum(mut_count > 200)    # zona gris
+
+# Ver el outlier
+sort(mut_count, decreasing = TRUE)[1:5]
+```
+
+There's only one hypermutator with over 10,927 mutations.
+
+## Driver detection
+
+### Gene level signals of selection
+
+To detect driver genes, we must remove hypermutators (`max_coding_muts_per_sample=500`) and samples with more than 3 mutation in a given gene (`max_muts_per_gene_per_sample=3`).
+
+The `outmats=T` option generates matrixes with information about the mutation in the trinucleotide context, type of substitution and specific site.
+
+```{r}
+dout = dndscv(muts, max_muts_per_gene_per_sample=3,max_coding_muts_per_sample=500, outmats=T)
+```
+
+The output lists only unique mutations if the samples are related. Some bases were affected but we'll ignore it because it's a very small number
+
+### Looking at the output
+
+```{r}
+names(dout)
+```
+
+## Table of significant genes
+
+Analyze genes with significant q-values (combined p-value for the different p-values calculated), which are stored in `sel_cv$qglobal_cv`
+
+```{r}
+driver_genes = dout$sel_cv[which(dout$sel_cv$qglobal_cv < 0.1), ]
+driver_genes
+genes = driver_genes$gene_name
+```
+
+There are 7 significative genes: *TP53*, *KRAS*, *CDKN2A.p16INK4a*, *CDKN2A.p14arf,* *SMAD4, RNF43, ARID1A*
+
+```{r}
+options(scipen = 999)
+dout$sel_cv[which(dout$sel_cv$qglobal_cv < 0.1 & # Verifies it's significant
+                    (dout$sel_cv$wnon_cv < 1 | 
+                    dout$sel_cv$wspl_cv < 1 | 
+                    dout$sel_cv$wind_cv < 1)), ]
+```
+
+There are no genes under negative selection.
+
+```{r}
+geneci(dout, gene_list = "TP53")
+```
+
+## Hotspots
+
+```{r}
+for (gene in genes){
+  name_gene = dout$annotmuts[which(dout$annotmuts$gene == gene), ]
+  cat("Table of gene: ", gene, "\n")
+  print(table(name_gene$aachange))
+  cat("\n")
+}
+```
+
+The dots (.) represent impacts in splicing sites, deletions or insertions that change ORF. That's the reason a change in a specific aminoacid isn't shown.
+
+We can do an analysis with more information
+
+```{r}
+# Adds column with information about gene, AA change, nucleotide change, position and impact
+dout$annotmuts$gene_and_aachange = paste(dout$annotmuts$gene,
+dout$annotmuts$aachange, dout$annotmuts$ntchange, dout$annotmuts$pos,
+dout$annotmuts$impact, sep=":")
+
+# Counts how many times a observation appears
+# Organizes from most to least
+# Just first 10 observations
+sort(table(dout$annotmuts$gene_and_aachange), decreasing=T)[1:10]
+```
+
+We could find more information about the 7 genes in COSMIC. Functions, common mutations and important domains.
+
+## Global signals of selection
+
+To see the global dN/dS ratios for all genes, we can use the following code:
+
+```{r}
+print(dout$globaldnds)
+```
+
+**Is there evidence of positive or negative selection?**
+
+wspl is \<1, that could mean negative selection, but dndscv interprets the depletion of mutations at splice sites like signs of negative selection.
+
+However, as all the other coefficients and their confidence intervals are \> 1, they may represent positive selection.
+
+But, to estimate the number of missense driver mutations per sample, we have the following information:
+
+```{r}
+w = dout$globaldnds[1,2]
+n_mis = length(which(dout$annotmuts$impact == "Missense"))
+num_samples = length(table(unique(muts$sampleID)))
+
+cat("Selection coefficient of missense mutations: ", w, "\n")
+cat("Number of missense mutations in cohort: ", n_mis, "\n")
+cat("Number of samples in cohort: ", num_samples)
+
+```
+
+$$
+\frac{\omega-1}{\omega}=\frac{1.1436-1}{1.1436}=0.1255
+$$
+
+The proportion of missense mutations with positive selection are 12.55%, which represent 326.92 mutations in the cohort. The average per sample is 1.981 mutations.
+
+## Sitednds
+
+Selection at specific sites
+
+```{r}
+# Load the the Cancer Gene Census (v81) genes
+data("cancergenes_cgc81", package="dndscv")
+dout_cancergenes = dndscv(muts, outmats=T, gene_list=known_cancergenes)
+```
+
+```{r}
+sout = sitednds(dout_cancergenes)
+names(sout)
+```
+
+```{r}
+sout$recursites[which(sout$recursites$qval < 0.1), ]
+```
+
+We found some sites with a relevant q-valor in the previously identified genes, some are relevent hotspots.
+
+## Codondnds
+
+Looks for selection at codons.
+
+```{r}
+data("refcds_hg19", package = "dndscv")
+RefCDS_codon = buildcodon(RefCDS)
+codon_dnds = codondnds(dout_cancergenes, RefCDS_codon,
+theta_option="conservative", min_recurr=2)
+
+# Output of significant values
+codon_dnds$recurcodons[which(codon_dnds$recurcodons$qval<0.1),]
+```
+
+# Maftools
+
+Oncoplots or waterfall plots are plot that help visualize frequently affected genes in a cohort, and information like number and type of mutations, annotations of clinical data, etc.
+
+Each column is a sample, and each row is a gene. Shows mutations with color code.
+
+We'll generate them with maftools with our PAAD data.
+
+```{r}
+library(maftools)
+#Pudimos leerlo directamente porque ya tenía las columnas correctas
+PAAD = read.maf(maf = "C:/Users/Dell/Documents/funcional2/PAAD/data_mutations.txt")
+```
+
+```{r}
+oncoplot(maf = PAAD)
+```
+
+We can see the genes with more mutations. TTN is probably present because it's a large gene, so we can ignore it.
+
+```{r}
+oncoplot(PAAD, top = 6, genesToIgnore = c("TTN"))
+```
+
+Oncoplot with genes that we found with dndscv
+
+```{r}
+oncoplot(PAAD, genes = c("TP53", "KRAS", "CDKN2A", "SMAD4", "RNF43", "ARID1A"))
+```
+
+SMAD4 and CDK2A appear to be mutually exclusive.
+
+```{r}
+oncoplot(PAAD, genes = c("CDKN2A", "SMAD4"))
+```
+
+## Adding annotations
+
+```{r}
+oncoplot(PAAD, genes = c("TP53", "KRAS", "CDKN2A", "SMAD4", "RNF43", "ARID1A"), draw_titv = TRUE)
+```
+
+Most mutations are C\>T
+
+## Adding pathways
+
+```{r}
+oncoplot(maf = PAAD, 
+         pathways = 'smgb', 
+         gene_mar = 5, # Changes margin width in gene names
+         fontSize = 0.4, # Changes size of gene names
+         topPathways = 3) # Displays 3 most affected pathways
+```
+
+The more affected pathways are:
+
+-   MAPK signaling -\> KRAS
+
+-   Genome integrity -\> TP53
+
+-   TGFB signaling -\> SMAD4
+
+## Other tools
+
+### Summary plot
+
+```{r}
+plotmafSummary(maf = PAAD, addStat = "median", dashboard = TRUE)
+```
+
+### Plot for transitions and transversions
+
+```{r}
+PAAD_titv = titv(maf = PAAD, plot = FALSE)
+plotTiTv(res = PAAD_titv)
+```
+
+### Lollipop plot
+
+```{r}
+lollipopPlot(maf = PAAD, gene = "TP53", showMutationRate = TRUE, labelPos = c(248, 245, 282, 273))
+lollipopPlot(maf = PAAD, gene = "KRAS", showMutationRate = TRUE, labelPos = c(12, 61))
+lollipopPlot(maf = PAAD, gene = "CDKN2A", showMutationRate = TRUE, labelPos = c(83, 97, 94))
+lollipopPlot(maf = PAAD, gene = "SMAD4", showMutationRate = TRUE)
+lollipopPlot(maf = PAAD, gene = "RNF43", showMutationRate = TRUE)
+lollipopPlot(maf = PAAD, gene = "ARID1A", showMutationRate = TRUE)
+```
