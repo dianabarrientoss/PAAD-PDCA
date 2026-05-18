@@ -1,3 +1,5 @@
+# Diana Barrientos
+# 26/03/2026
 .libPaths('/mnt/data/bioinfo-estadistica-2/dbarrientos/env/Rlibs')
 #cargar librerías
 library(tidyverse)
