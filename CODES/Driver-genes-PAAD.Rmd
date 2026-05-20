@@ -236,20 +236,27 @@ library(maftools)
 PAAD = read.maf(maf = "C:/Users/Dell/Documents/funcional2/PAAD/data_mutations.txt")
 ```
 
+Ver número de muestras mutadas
+
+```{r}
+gen_summary = getGeneSummary(PAAD)
+gen_summary
+```
+
 ```{r}
 oncoplot(maf = PAAD)
 ```
 
-We can see the genes with more mutations. TTN is probably present because it's a large gene, so we can ignore it.
+We can see the genes with more mutations.
 
 ```{r}
-oncoplot(PAAD, top = 6, genesToIgnore = c("TTN"))
+oncoplot(PAAD, top = 9)
 ```
 
 Oncoplot with genes that we found with dndscv
 
 ```{r}
-oncoplot(PAAD, genes = c("TP53", "KRAS", "CDKN2A", "SMAD4", "RNF43", "ARID1A"))
+oncoplot(PAAD, genes = c("KRAS", "TP53", "SMAD4", "CDKN2A", "RNF43", "CSMD2", "ARID1A", "TTN", "MUC16"))
 ```
 
 SMAD4 and CDK2A appear to be mutually exclusive.
